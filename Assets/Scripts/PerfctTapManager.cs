@@ -61,6 +61,10 @@ public class PerfectTapManager : MonoBehaviour
         if (movingCircle != null)
             circleImage = movingCircle.GetComponent<Image>();
 
+        // ensure the ball is always white regardless of any prefs
+        if (circleImage != null)
+            circleImage.color = Color.white;
+
         // حفظ نقطة البداية الصحيحة
         if (movingCircle != null)
             circleStartPosition = movingCircle.localPosition;
@@ -69,9 +73,8 @@ public class PerfectTapManager : MonoBehaviour
         isMuted = PlayerPrefs.GetInt("Muted", 0) == 1;
         AudioListener.pause = isMuted;
 
-        // استرجاع لون الدائرة
-        int savedColor = PlayerPrefs.GetInt("CircleColorIndex", 0);
-        SetCircleColorByIndex(savedColor);
+        // grab a reference to the difficulty manager singleton if it exists
+        difficultyManager = DifficultyManager.Instance;
 
         ShowMainMenu();
     }
@@ -110,10 +113,19 @@ public class PerfectTapManager : MonoBehaviour
     {
         score = 0;
 
-        currentSpeed = startSpeed;
-        moveDistance = moveDistanceChallenge;
-        perfectThreshold = perfectThresholdChallenge;
-        speedMultiplier = speedMultiplierChallenge;
+        // let the difficulty manager adjust speeds, thresholds and line length
+        if (difficultyManager != null)
+        {
+            difficultyManager.ApplySettings(this);
+        }
+        else
+        {
+            // fallback to previous values
+            currentSpeed = startSpeed;
+            moveDistance = moveDistanceChallenge;
+            perfectThreshold = perfectThresholdChallenge;
+            speedMultiplier = speedMultiplierChallenge;
+        }
 
         direction = 1;
         isGameActive = true;
@@ -145,7 +157,16 @@ public class PerfectTapManager : MonoBehaviour
             movingCircle.localPosition.x - centerLine.localPosition.x
         );
 
-        if (distance <= perfectThreshold)
+        // compute hit zone exactly as half the centre line width; if we can't get the RectTransform fall back to cached threshold
+        float threshold = perfectThreshold;
+        if (centerLine != null)
+        {
+            RectTransform rt = centerLine.GetComponent<RectTransform>();
+            if (rt != null)
+                threshold = rt.sizeDelta.x * 0.5f;
+        }
+
+        if (distance <= threshold)
         {
             score++;
             currentSpeed += speedMultiplier;
@@ -227,46 +248,58 @@ public class PerfectTapManager : MonoBehaviour
     }
 
     // ===================== DIFFICULTY BUTTONS =====================
+    // called by UI buttons to change the difficulty
     public void SetDifficulty(int level)
     {
-        switch (level)
+        if (difficultyManager == null)
+            difficultyManager = DifficultyManager.Instance;
+
+        if (difficultyManager != null)
         {
-            case 0: // Easy
-                startSpeed = 150f;
-                perfectThresholdChallenge = 400f;
-                break;
-
-            case 1: // Medium
-                startSpeed = 312f;
-                perfectThresholdChallenge = 200f;
-                break;
-
-            case 2: // Hard
-                startSpeed = 500f;
-                perfectThresholdChallenge = 100f;
-                break;
+            difficultyManager.SetLevel((DifficultyManager.Level)level);
+            difficultyManager.ApplySettings(this);
         }
+    }
 
-        currentSpeed = startSpeed;
-        perfectThreshold = perfectThresholdChallenge;
+    // public helper used by DifficultyManager so it doesn't need to reach into our private fields
+    public void ConfigureForDifficulty(float ballSpeed, float hitZoneSize, float centerLineLength)
+    {
+        startSpeed = ballSpeed;
+        currentSpeed = ballSpeed;
+        perfectThresholdChallenge = hitZoneSize;
+        moveDistanceChallenge = centerLineLength * 0.5f;
+
+        // also update runtime variables
+        perfectThreshold = hitZoneSize;
+        moveDistance = centerLineLength * 0.5f;
+
+        // adjust the center line transform if available
+        if (centerLine != null)
+        {
+            RectTransform rt = centerLine.GetComponent<RectTransform>();
+            if (rt != null)
+            {
+                Vector2 size = rt.sizeDelta;
+                size.x = centerLineLength;
+                rt.sizeDelta = size;
+            }
+        }
     }
 
     // ===================== COLOR BUTTONS =====================
+    // circle color is now always white; color selection removed
+    // kept here for legacy, but it does nothing
     public void SetCircleColorByIndex(int index)
     {
         if (circleImage == null) return;
+        circleImage.color = Color.white;
+    }
 
-        switch (index)
-        {
-            case 0: circleImage.color = Color.white; break;
-            case 1: circleImage.color = Color.red; break;
-            case 2: circleImage.color = Color.green; break;
-            case 3: circleImage.color = Color.blue; break;
-            case 4: circleImage.color = Color.yellow; break;
-            default: circleImage.color = Color.white; break;
-        }
-
-        PlayerPrefs.SetInt("CircleColorIndex", index);
+    // allow UI to change background via the background manager
+    public void SetBackgroundColor(int index)
+    {
+        if (BackgroundColorManager.Instance != null)
+            BackgroundColorManager.Instance.SetBackground((BackgroundColorManager.BgColor)index);
     }
 
     // ===================== UI =====================
